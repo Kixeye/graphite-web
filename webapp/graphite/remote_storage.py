@@ -107,15 +107,14 @@ class RemoteNode:
     if not self.__isLeaf:
       return []
 
-    now = now or int(time.time())
-    endTime = endTime or now
-
     query_params = [
       ('target', self.metric_path),
       ('format', 'pickle'),
       ('from', str( int(startTime) )),
       ('until', str( int(endTime) ))
     ]
+    if now is not None:
+      query_params['now'] = str( int(now) )
     query_string = urlencode(query_params)
 
     connection = HTTPConnectionWithTimeout(self.store.host)
