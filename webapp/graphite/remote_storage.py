@@ -99,7 +99,10 @@ class RemoteNode:
     self.fs_path = None
     self.metric_path = metric_path
     self.real_metric = metric_path
-    self.name = metric_path.split('.')[-1]
+    if type(metric_path) is list:
+      self.name = metric_path[0].split('.')[-1]
+    else:
+      self.name = metric_path.split('.')[-1]
     self.__isLeaf = isLeaf
 
 
@@ -108,18 +111,25 @@ class RemoteNode:
       return []
 
     query_params = [
-      ('target', self.metric_path),
       ('format', 'pickle'),
       ('from', str( int(startTime) )),
       ('until', str( int(endTime) ))
     ]
+
+    if type(self.metric_path) is list:
+      metricList = self.metric_path
+    else:
+      metricList = [self.metric_path]
+    query_params.extend([('target', metric) for metric in metricList])
+
     if now is not None:
       query_params.append(('now', str( int(now) )))
+
     query_string = urlencode(query_params)
 
     connection = HTTPConnectionWithTimeout(self.store.host)
     connection.timeout = settings.REMOTE_STORE_FETCH_TIMEOUT
-    connection.request('GET', '/render/?' + query_string)
+    connection.request('POST', '/render/', query_string)
     response = connection.getresponse()
     assert response.status == 200, "Failed to retrieve remote data: %d %s" % (response.status, response.reason)
     rawData = response.read()
@@ -129,11 +139,14 @@ class RemoteNode:
     if seriesList == []:
       return None
 
-    assert len(seriesList) == 1, "Invalid result: seriesList=%s" % str(seriesList)
-    series = seriesList[0]
+    assert len(seriesList) == len(metricList), "Invalid result: seriesList=%s" % str(seriesList)
 
-    timeInfo = (series['start'], series['end'], series['step'])
-    return (timeInfo, series['values'])
+    results = [(series['name'], ((series['start'], series['end'], series['step']), series['values'])) for series in seriesList]
+
+    if type(self.metric_path) is list:
+      return results
+    else:
+      return results[0][1]
 
   def isLeaf(self):
     return self.__isLeaf

@@ -18,6 +18,7 @@ import time
 from django.conf import settings
 from graphite.logger import log
 from graphite.storage import STORE, LOCAL_STORE
+from graphite.remote_storage import RemoteNode
 from graphite.render.hashing import ConsistentHashRing
 from graphite.util import unpickle
 
@@ -216,6 +217,8 @@ CarbonLink = CarbonLinkPool(hosts, settings.CARBONLINK_TIMEOUT)
 # Data retrieval API
 def fetchData(requestContext, pathExpr):
   seriesList = []
+  resultsList = []
+  remoteNodes = {}
   startTime = requestContext['startTime']
   endTime = requestContext['endTime']
   now = requestContext['now']
@@ -227,22 +230,36 @@ def fetchData(requestContext, pathExpr):
 
   for dbFile in store.find(pathExpr):
     log.metric_access(dbFile.metric_path)
-    dbResults = dbFile.fetch( timestamp(startTime), timestamp(endTime), timestamp(now))
-    results = dbResults
 
     if dbFile.isLocal():
+      dbResults = dbFile.fetch(timestamp(startTime), timestamp(endTime), timestamp(now))
+      results = dbResults
+
       try:
         cachedResults = CarbonLink.query(dbFile.real_metric)
         results = mergeResults(dbResults, cachedResults)
       except:
         log.exception("Failed CarbonLink query '%s'" % dbFile.real_metric)
 
-    if not results:
-      continue
+      if results:
+        resultsList.append((dbFile.metric_path, results))
 
-    (timeInfo,values) = results
-    (start,end,step) = timeInfo
-    series = TimeSeries(dbFile.metric_path, start, end, step, values)
+    elif dbFile.isLeaf():
+      if dbFile.store in remoteNodes:
+        remoteNodes[dbFile.store].metric_path.append(dbFile.metric_path)
+      else:
+        remoteNodes[dbFile.store] = RemoteNode(dbFile.store, [dbFile.metric_path], True)
+
+  for remoteNode in remoteNodes:
+    results = remoteNodes[remoteNode].fetch(timestamp(startTime), timestamp(endTime), timestamp(now))
+
+    if results:
+      resultsList.extend(results)
+
+  for results in resultsList:
+    (metricPath, (timeInfo, values)) = results
+    (start, end, step) = timeInfo
+    series = TimeSeries(metricPath, start, end, step, values)
     series.pathExpression = pathExpr #hack to pass expressions through to render functions
     seriesList.append(series)
 
