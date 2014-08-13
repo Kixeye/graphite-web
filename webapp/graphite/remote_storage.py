@@ -103,7 +103,7 @@ class RemoteNode:
     self.__isLeaf = isLeaf
 
 
-  def fetch(self, startTime, endTime, now=None):
+  def fetch(self, startTime, endTime):
     if not self.__isLeaf:
       return []
 
@@ -113,8 +113,6 @@ class RemoteNode:
       ('from', str( int(startTime) )),
       ('until', str( int(endTime) ))
     ]
-    if now is not None:
-      query_params['now'] = str( int(now) )
     query_string = urlencode(query_params)
 
     connection = HTTPConnectionWithTimeout(self.store.host)
