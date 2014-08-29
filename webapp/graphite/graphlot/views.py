@@ -3,7 +3,6 @@ import re
 from django.shortcuts import render_to_response
 from django.http import Http404
 from django.conf import settings
-from django.core.urlresolvers import get_script_prefix
 
 from graphite.account.models import Profile
 from graphite.compat import HttpResponse, HttpResponseBadRequest
@@ -88,7 +87,6 @@ def header(request):
     'user' : request.user,
     'profile' : getProfile(request),
     'documentation_url' : settings.DOCUMENTATION_URL,
-    'slash' : get_script_prefix()
   }
   return render_to_response("browserHeader.html", context)
 
@@ -98,7 +96,6 @@ def browser(request):
   context = {
     'queryString' : request.GET.urlencode(),
     'target' : request.GET.get('target'),
-    'slash' : get_script_prefix()
   }
   if context['queryString']:
     context['queryString'] = context['queryString'].replace('#','%23')
