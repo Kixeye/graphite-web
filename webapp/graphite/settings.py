@@ -62,12 +62,12 @@ CARBONLINK_HASHING_KEYFUNC = None
 CARBONLINK_RETRY_DELAY = 15
 REPLICATION_FACTOR = 1
 MEMCACHE_HOSTS = []
+MEMCACHE_KEY_PREFIX = ''
 FIND_CACHE_DURATION = 300
 FIND_TOLERANCE = 2 * FIND_CACHE_DURATION
 DEFAULT_CACHE_DURATION = 60 #metric data and graphs are cached for one minute by default
 LOG_CACHE_PERFORMANCE = False
 LOG_ROTATE = True
-
 MAX_FETCH_RETRIES = 2
 
 #Remote rendering settings
@@ -121,16 +121,7 @@ DASHBOARD_REQUIRE_PERMISSIONS = False
 # NOTE: Requires DASHBOARD_REQUIRE_AUTHENTICATION to be set
 DASHBOARD_REQUIRE_EDIT_GROUP = None
 
-DATABASES = {
-  'default': {
-    'NAME': '/opt/graphite/storage/graphite.db',
-    'ENGINE': 'django.db.backends.sqlite3',
-    'USER': '',
-    'PASSWORD': '',
-    'HOST': '',
-    'PORT': '',
-  },
-}
+DATABASES = None
 
 # If using rrdcached, set to the address or socket of the daemon
 FLUSHRRDCACHED = ''
@@ -189,6 +180,18 @@ if not STANDARD_DIRS:
   except ImportError:
     pass
 
+if DATABASES is None:
+    DATABASES = {
+      'default': {
+        'NAME': join(STORAGE_DIR, 'graphite.db'),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'USER': '',
+        'PASSWORD': '',
+        'HOST': '',
+        'PORT': '',
+      },
+    }
+
 # Handle URL prefix in static files handling
 if URL_PREFIX and not STATIC_URL.startswith(URL_PREFIX):
     STATIC_URL = '/{0}{1}'.format(URL_PREFIX.strip('/'), STATIC_URL)
@@ -205,6 +208,7 @@ if MEMCACHE_HOSTS:
         'BACKEND': 'django.core.cache.backends.memcached.MemcachedCache',
         'LOCATION': MEMCACHE_HOSTS,
         'TIMEOUT': DEFAULT_CACHE_DURATION,
+        'KEY_PREFIX': MEMCACHE_KEY_PREFIX,
     }
 
 # Authentication shortcuts

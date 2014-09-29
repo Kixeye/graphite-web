@@ -507,7 +507,7 @@ def asPercent(requestContext, seriesList, total=None):
 
   return resultList
 
-def divideSeries(requestContext, dividendSeriesList, divisorSeriesList):
+def divideSeries(requestContext, dividendSeriesList, divisorSeries):
   """
   Takes a dividend metric and a divisor metric and draws the division result.
   A constant may *not* be passed. To divide by a constant, use the scale()
@@ -522,10 +522,10 @@ def divideSeries(requestContext, dividendSeriesList, divisorSeriesList):
 
 
   """
-  if len(divisorSeriesList) != 1:
+  if len(divisorSeries) != 1:
     raise ValueError("divideSeries second argument must reference exactly 1 series")
 
-  divisorSeries = divisorSeriesList[0]
+  divisorSeries = divisorSeries[0]
   results = []
 
   for dividendSeries in dividendSeriesList:
@@ -2474,7 +2474,7 @@ def aggregateLine(requestContext, seriesList, func='avg'):
 
   .. code-block:: none
 
-    &target=aggregateLineSeries(server.connections.total, 'avg')
+    &target=aggregateLine(server.connections.total, 'avg')
 
   """
   t_funcs = { 'avg': safeAvg, 'min': safeMin, 'max': safeMax }
@@ -3005,7 +3005,7 @@ def hitcount(requestContext, seriesList, intervalString, alignToInterval = False
   return results
 
 
-def timeFunction(requestContext, name):
+def timeFunction(requestContext, name, step=60):
   """
   Short Alias: time()
 
@@ -3019,10 +3019,9 @@ def timeFunction(requestContext, name):
 
   This would create a series named "The.time.series" that contains in Y the same
   value (in seconds) as X.
+  Accepts optional second argument as 'step' parameter (default step is 60 sec)
 
   """
-
-  step = 60
   delta = timedelta(seconds=step)
   when = requestContext["startTime"]
   values = []
@@ -3039,7 +3038,7 @@ def timeFunction(requestContext, name):
 
   return [series]
 
-def sinFunction(requestContext, name, amplitude=1):
+def sinFunction(requestContext, name, amplitude=1, step=60):
   """
   Short Alias: sin()
 
@@ -3053,8 +3052,9 @@ def sinFunction(requestContext, name, amplitude=1):
     &target=sin("The.time.series", 2)
 
   This would create a series named "The.time.series" that contains sin(x)*2.
+  Accepts optional second argument as 'amplitude' parameter (default amplitude is 1)
+  Accepts optional third argument as 'step' parameter (default step is 60 sec)
   """
-  step = 60
   delta = timedelta(seconds=step)
   when = requestContext["startTime"]
   values = []
@@ -3068,7 +3068,7 @@ def sinFunction(requestContext, name, amplitude=1):
             int(time.mktime(requestContext["endTime"].timetuple())),
             step, values)]
 
-def randomWalkFunction(requestContext, name):
+def randomWalkFunction(requestContext, name, step=60):
   """
   Short Alias: randomWalk()
 
@@ -3083,8 +3083,8 @@ def randomWalkFunction(requestContext, name):
 
   This would create a series named "The.time.series" that contains points where
   x(t) == x(t-1)+random()-0.5, and x(0) == 0.
+  Accepts optional second argument as 'step' parameter (default step is 60 sec)
   """
-  step = 60
   delta = timedelta(seconds=step)
   when = requestContext["startTime"]
   values = []
