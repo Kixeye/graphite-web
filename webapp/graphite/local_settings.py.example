@@ -165,11 +165,11 @@
 #########################
 # (To avoid excessive DNS lookups you want to stick to using IP addresses only in this entire section)
 #
-# This should list the IP address (and optionally port) of the webapp on each
-# remote server in the cluster. These servers must each have local access to
-# metric data. Note that the first server to return a match for a query will be
-# used.
-#CLUSTER_SERVERS = ["10.0.2.2:80", "10.0.2.3:80"]
+# This should list the IP address (and optionally port and/or URL prefix) of the
+# webapp on each remote server in the cluster. These servers must each have local
+# access to metric data. Note that the first server to return a match for a query
+# will be used.
+#CLUSTER_SERVERS = ["10.0.2.2:80", "10.0.2.3:80/graphite"]
 
 ## These are timeout values (in seconds) for requests to remote webapps
 #REMOTE_STORE_FETCH_TIMEOUT = 6   # Timeout to fetch series data

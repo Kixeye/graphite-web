@@ -14,8 +14,11 @@ class RemoteStore(object):
   retryDelay = settings.REMOTE_STORE_RETRY_DELAY
   available = property(lambda self: time.time() - self.lastFailure > self.retryDelay)
 
-  def __init__(self, host):
-    self.host = host
+  def __init__(self, url):
+    urlparts = url.split('/', 1)
+    self.host = urlparts[0]
+    prefix = urlparts[1].strip('/')
+    self.prefix = '/' + prefix if prefix else ''
 
 
   def find(self, query):
@@ -57,7 +60,7 @@ class FindRequest:
     query_string = urlencode(query_params)
 
     try:
-      self.connection.request('POST', '/metrics/find/', query_string)
+      self.connection.request('POST', self.store.prefix + '/metrics/find/', query_string)
     except:
       self.store.fail()
       if not self.suppressErrors:
@@ -129,7 +132,7 @@ class RemoteNode:
 
     connection = HTTPConnectionWithTimeout(self.store.host)
     connection.timeout = settings.REMOTE_STORE_FETCH_TIMEOUT
-    connection.request('POST', '/render/', query_string)
+    connection.request('POST', self.store.prefix + '/render/', query_string)
     response = connection.getresponse()
     assert response.status == 200, "Failed to retrieve remote data: %d %s" % (response.status, response.reason)
     rawData = response.read()
