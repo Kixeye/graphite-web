@@ -98,6 +98,10 @@ def is_local_interface(host):
   if ':' in host:
     host = host.split(':',1)[0]
 
+  # If "localhost" or a loopback IP has been specified it is a deliberate reference
+  if host == 'localhost' or host.startswith('127.'):
+    return False
+
   for port in xrange(1025, 65535):
     try:
       sock = socket.socket()
