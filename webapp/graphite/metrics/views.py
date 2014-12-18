@@ -131,6 +131,8 @@ def find_view(request):
   contexts = int( request.REQUEST.get('contexts', 0) )
   wildcards = int( request.REQUEST.get('wildcards', 0) )
   automatic_variants = int( request.REQUEST.get('automatic_variants', 0) )
+  leaves_only = int( request.REQUEST.get('leaves_only', 0) )
+  delete_found = int( request.REQUEST.get('delete_found', 0) )
   jsonp = request.REQUEST.get('jsonp', False)
 
   try:
@@ -161,7 +163,7 @@ def find_view(request):
       query = '.'.join(query_parts)
 
   try:
-    matches = list( store.find(query) )
+    matches = list( store.find(query, leaves_only=leaves_only, delete_found=delete_found) )
   except:
     log.exception()
     raise
@@ -215,9 +217,8 @@ def expand_view(request):
   results = {}
   for query in request.REQUEST.getlist('query'):
     results[query] = set()
-    for node in store.find(query):
-      if node.isLeaf() or not leaves_only:
-        results[query].add( node.metric_path )
+    for node in store.find(query, leaves_only=leaves_only):
+      results[query].add( node.metric_path )
 
   # Convert our results to sorted lists because sets aren't json-friendly
   if group_by_expr:
@@ -228,6 +229,45 @@ def expand_view(request):
 
   result = {
     'results' : results
+  }
+
+  response = json_response_for(request, result)
+  response['Pragma'] = 'no-cache'
+  response['Cache-Control'] = 'no-cache'
+  return response
+
+
+def delete_view(request):
+  "View for deleting metrics by providing a pattern"
+  local_only    = int( request.REQUEST.get('local', 0) )
+  group_by_expr = int( request.REQUEST.get('groupByExpr', 0) )
+  leaves_only   = int( request.REQUEST.get('leavesOnly', 1) )
+
+  if request.REQUEST.getlist('query') != request.REQUEST.getlist('confirm'): 
+    return HttpResponseBadRequest(content="Parameter 'confirm' must match parameter 'query'", mimetype="text/plain")
+
+  if local_only:
+    store = LOCAL_STORE
+  else:
+    store = STORE
+
+  results = {}
+  for query in request.REQUEST.getlist('query'):
+    results[query] = set()
+    for node in store.find(query, leaves_only=leaves_only, delete_found=1):
+      results[query].add(node.metric_path)
+
+  # Convert our results to sorted lists because sets aren't json-friendly
+  if group_by_expr:
+    for query, matches in results.items():
+      results[query] = sorted(matches)
+  else:
+    results = sorted( reduce(set.union, results.values(), set()) )
+
+  log.info('delete_view query=%s local_only=%s' % (query, local_only))
+
+  result = {
+    'deleted' : results
   }
 
   response = json_response_for(request, result)

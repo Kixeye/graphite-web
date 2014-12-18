@@ -20,8 +20,8 @@ class RemoteStore(object):
     self.prefix = '/' + urlparts[1].strip('/') if len(urlparts) > 1 and len(urlparts[1]) > 0 else ''
 
 
-  def find(self, query):
-    request = FindRequest(self, query)
+  def find(self, query, leaves_only=0, delete_found=0):
+    request = FindRequest(self, query, leaves_only=leaves_only, delete_found=delete_found)
     request.send()
     return request
 
@@ -34,9 +34,11 @@ class RemoteStore(object):
 class FindRequest:
   suppressErrors = True
 
-  def __init__(self, store, query):
+  def __init__(self, store, query, leaves_only=0, delete_found=0):
     self.store = store
     self.query = query
+    self.leaves_only = leaves_only
+    self.delete_found = delete_found
     self.connection = None
     self.cacheKey = compactHash('find:%s:%s' % (self.store.host, query))
     self.cachedResults = None
@@ -55,6 +57,8 @@ class FindRequest:
       ('local', '1'),
       ('format', 'pickle'),
       ('query', self.query),
+      ('leaves_only', self.leaves_only),
+      ('delete_found', self.delete_found),
     ]
     query_string = urlencode(query_params)
 

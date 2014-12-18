@@ -1,5 +1,7 @@
 import os, time, fnmatch, socket, errno
 from django.conf import settings
+from os import unlink
+from shutil import rmtree
 from os.path import isdir, isfile, join, exists, splitext, basename, realpath
 import whisper
 
@@ -46,41 +48,40 @@ class Store:
         return WhisperFile(absolute_fs_path, metric_path)
 
 
-  def find(self, query):
+  def find(self, query, leaves_only=0, delete_found=0):
     if is_pattern(query):
-
-      for match in self.find_all(query):
+      for match in self.find_all(query, leaves_only=leaves_only, delete_found=delete_found):
         yield match
 
     else:
-      match = self.find_first(query)
+      match = self.find_first(query, leaves_only=leaves_only, delete_found=delete_found)
 
       if match is not None:
         yield match
 
 
-  def find_first(self, query):
+  def find_first(self, query, leaves_only=0, delete_found=0):
     # Search locally first
     for directory in self.directories:
-      for match in find(directory, query):
+      for match in find(directory, query, leaves_only=leaves_only, delete_found=delete_found):
         return match
 
     # If nothing found earch remotely
-    remote_requests = [ r.find(query) for r in self.remote_stores if r.available ]
+    remote_requests = [ r.find(query, leaves_only=leaves_only, delete_found=delete_found) for r in self.remote_stores if r.available ]
 
     for request in remote_requests:
       for match in request.get_results():
         return match
 
 
-  def find_all(self, query):
+  def find_all(self, query, leaves_only=0, delete_found=0):
     # Start remote searches
     found = set()
-    remote_requests = [ r.find(query) for r in self.remote_stores if r.available ]
+    remote_requests = [ r.find(query, leaves_only=leaves_only, delete_found=delete_found) for r in self.remote_stores if r.available ]
 
     # Search locally
     for directory in self.directories:
-      for match in find(directory, query):
+      for match in find(directory, query, leaves_only=leaves_only, delete_found=delete_found):
         if match.metric_path not in found:
           yield match
           found.add(match.metric_path)
@@ -131,6 +132,12 @@ def is_escaped_pattern(s):
         return True
   return False
 
+def delete(path):
+  if isfile(path):
+    unlink(path)
+  elif isdir(path):
+    rmtree(path)
+
 def find_escaped_pattern_fields(pattern_string):
   pattern_parts = pattern_string.split('.')
   for index,part in enumerate(pattern_parts):
@@ -138,7 +145,7 @@ def find_escaped_pattern_fields(pattern_string):
       yield index
 
 
-def find(root_dir, pattern):
+def find(root_dir, pattern, leaves_only=0, delete_found=0):
   "Generates nodes beneath root_dir matching the given pattern"
   clean_pattern = pattern.replace('\\', '')
   pattern_parts = clean_pattern.split('.')
@@ -159,29 +166,39 @@ def find(root_dir, pattern):
       metric_path_parts[field_index] = pattern_parts[field_index].replace('\\', '')
     metric_path = '.'.join(metric_path_parts)
 
-    if isdir(absolute_path):
+    if isdir(absolute_path) and not leaves_only:
       yield Branch(absolute_path, metric_path)
+      if delete_found:
+        delete(absolute_path)
 
     elif isfile(absolute_path):
       (metric_path,extension) = splitext(metric_path)
 
       if extension == '.wsp':
         yield WhisperFile(absolute_path, metric_path)
+        if delete_found:
+          delete(absolute_path)
 
       elif extension == '.gz' and metric_path.endswith('.wsp'):
         metric_path = splitext(metric_path)[0]
         yield GzippedWhisperFile(absolute_path, metric_path)
+        if delete_found:
+          delete(absolute_path)
 
       elif rrdtool and extension == '.rrd':
         rrd = RRDFile(absolute_path, metric_path)
 
         if datasource_pattern is None:
           yield rrd
+          if delete_found:
+            delete(absolute_path)
 
         else:
           for source in rrd.getDataSources():
             if fnmatch.fnmatch(source.name, datasource_pattern):
               yield source
+              if delete_found:
+                delete(absolute_path)
 
 
 def _find(current_dir, patterns):
