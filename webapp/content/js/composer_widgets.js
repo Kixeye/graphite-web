@@ -381,7 +381,7 @@ function saveMyGraph(button, e) {
 
       //Save the name for future use and re-load the "My Graphs" tree
       Composer.state.myGraphName = text;
-      Browser.trees.mygraphs.reload();
+
       //Send the request
       Ext.Ajax.request({
         method: 'GET',
@@ -399,6 +399,7 @@ function saveMyGraph(button, e) {
 function handleSaveMyGraphResponse(options, success, response) {
   var message;
   if (success) {
+    Browser.trees.mygraphs.reload();
     message = "Graph saved successfully";
   } else {
     message = "There was an error saving your Graph, please try again later.";
@@ -426,15 +427,19 @@ function deleteMyGraph() {
 	return;
       }
 
-      Browser.trees.mygraphs.reload();
       //Send the request
       Ext.Ajax.request({
         method: 'GET',
         url: '../composer/mygraph/',
         params: {action: 'delete', graphName: text},
         callback: function (options, success, response) {
-          var message = success ? "Graph deleted successfully" : "There was an error performing the operation.";
-
+          var message;
+          if (success) {
+            Browser.trees.mygraphs.reload();
+            message = "Graph deleted successfully";
+          } else {
+            message = "There was an error performing the operation.";
+          }
           Ext.Msg.show({
             title: 'Delete My Graph',
             msg: message,
@@ -1091,6 +1096,7 @@ function createFunctionsMenu() {
         {text: 'Maximum Value Above', handler: applyFuncToEachWithInput('maximumAbove', 'Draw all metrics whose maximum value is above ___')},
         {text: 'Maximum Value Below', handler: applyFuncToEachWithInput('maximumBelow', 'Draw all metrics whose maximum value is below ___')},
         {text: 'Minimum Value Above', handler: applyFuncToEachWithInput('minimumAbove', 'Draw all metrics whose minimum value is above ___')},
+        {text: 'Minimum Value Below', handler: applyFuncToEachWithInput('minimumBelow', 'Draw all metrics whose minimum value is below ___')},
         {text: 'sortByMaxima', handler: applyFuncToEach('sortByMaxima')},
         {text: 'sortByMinima', handler: applyFuncToEach('sortByMinima')},
         {text: 'limit', handler: applyFuncToEachWithInput('limit', 'Limit to first ___ of a list of metrics')},
@@ -1310,6 +1316,7 @@ function createOptionsMenu() {
         }
       },
       menuInputItem("Line Thickness", "lineWidth", "Enter the line thickness in pixels"),
+      menuInputItem("Margin", "margin", "Enter the margin width in pixels"),
       menuCheckItem("Graph Only", "graphOnly"),
       menuCheckItem("Hide Axes", "hideAxes"),
       menuCheckItem("Hide Y-Axis", "hideYAxis"),
