@@ -142,6 +142,42 @@ class CarbonLinkPool:
     log.cache("CarbonLink cache-query request for %s returned %d datapoints" % (metric, len(results['datapoints'])))
     return results['datapoints']
 
+  def query_bulk(self, metrics):
+    cacheResultsByMetric = {}
+    metricsByHost = {}
+
+    for real_metric in metrics:
+      host = self.select_host(real_metric)
+      if metricsByHost.get(host):
+         metricsByHost[host].append(real_metric)
+      else:
+         metricsByHost[host] = [real_metric]
+
+    datapointsCounter = 0
+    for host, metrics in metricsByHost.items():
+       request = dict(type='cache-query-bulk', metrics=metrics)
+       serialized_request = pickle.dumps(request, protocol=-1)
+       len_prefix = struct.pack("!L", len(serialized_request))
+       request_packet = len_prefix + serialized_request
+
+       conn = self.get_connection(host)
+       try:
+         conn.sendall(request_packet)
+         result = self.recv_response(conn)
+       except:
+         self.last_failure[host] = time.time()
+         log.exception()
+       else:
+         self.connections[host].add(conn)
+         if 'error' in result:
+           log.cache("CarbonLink cache-query-bulk error %s" % result['error'])
+         else:
+           cacheResultsByMetric.update(result['datapointsByMetric'])
+           datapointsCounter += len(result['datapointsByMetric'])
+
+    log.cache("CarbonLink cache-query-bulk request returned %d datapoints" % datapointsCounter)
+    return cacheResultsByMetric
+
   def get_metadata(self, metric, key):
     request = dict(type='get-metadata', metric=metric, key=key)
     results = self.send_request(request)
@@ -228,7 +264,12 @@ def fetchData(requestContext, pathExpr):
   else:
     store = STORE
 
-  for dbFile in store.find(pathExpr):
+  dbFiles = [dbFile for dbFile in store.find(pathExpr)]
+
+  if settings.CARBONLINK_QUERY_BULK:
+    cacheResultsByMetric = CarbonLink.query_bulk([dbFile.real_metric for dbFile in dbFiles])
+
+  for dbFile in dbFiles:
     log.metric_access(dbFile.metric_path)
 
     if dbFile.isLocal():
@@ -236,8 +277,12 @@ def fetchData(requestContext, pathExpr):
       results = dbResults
 
       try:
-        cachedResults = CarbonLink.query(dbFile.real_metric)
-        results = mergeResults(dbResults, cachedResults)
+        if settings.CARBONLINK_QUERY_BULK:
+          cachedResults = cacheResultsByMetric.get(dbFile.real_metric,[])
+        else:
+          cachedResults = CarbonLink.query(dbFile.real_metric)
+        if cachedResults:
+          results = mergeResults(dbResults, cachedResults)
       except:
         log.exception("Failed CarbonLink query '%s'" % dbFile.real_metric)
 
