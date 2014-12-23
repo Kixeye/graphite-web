@@ -15,9 +15,12 @@ limitations under the License."""
 import socket
 import struct
 import time
+import threading
+import Queue
 from django.conf import settings
 from graphite.logger import log
 from graphite.storage import STORE, LOCAL_STORE
+from graphite.remote_storage import RemoteNode
 from graphite.render.hashing import ConsistentHashRing
 from graphite.util import unpickle, epoch
 
@@ -256,20 +259,14 @@ def fetchData(requestContext, pathExpr):
   endTime = int(epoch(requestContext['endTime']))
   now = int(epoch(requestContext['now']))
 
-  if requestContext['localOnly']:
-    store = LOCAL_STORE
-  else:
-    store = STORE
-
-  dbFiles = [dbFile for dbFile in store.find(pathExpr)]
+  dbFiles = [dbFile for dbFile in LOCAL_STORE.find(pathExpr)]
 
   if settings.CARBONLINK_QUERY_BULK:
     cacheResultsByMetric = CarbonLink.query_bulk([dbFile.real_metric for dbFile in dbFiles])
 
   for dbFile in dbFiles:
     log.metric_access(dbFile.metric_path)
-    dbResults = dbFile.fetch( timestamp(startTime), timestamp(endTime), timestamp(now))
-    results = dbResults
+    dbResults = dbFile.fetch(startTime, endTime, now)
 
     if dbFile.isLocal():
       try:
@@ -278,20 +275,104 @@ def fetchData(requestContext, pathExpr):
         else:
           cachedResults = CarbonLink.query(dbFile.real_metric)
         if cachedResults:
-          results = mergeResults(dbResults, cachedResults)
+          dbResults = mergeResults(dbResults, cachedResults)
       except:
         log.exception("Failed CarbonLink query '%s'" % dbFile.real_metric)
 
-    if not results:
+    if not dbResults:
       continue
 
-    (timeInfo,values) = results
+    (timeInfo,values) = dbResults
     (start,end,step) = timeInfo
     series = TimeSeries(dbFile.metric_path, start, end, step, values)
     series.pathExpression = pathExpr #hack to pass expressions through to render functions
     seriesList.append(series)
 
-  return seriesList
+  if not requestContext['localOnly']:
+    remote_nodes = [ RemoteNode(store, pathExpr, True) for store in STORE.remote_stores ]
+
+    # Go through all of the remote_nodes, and launch a remote_fetch for each one.
+    # Each fetch will take place in its own thread, since it's naturally parallel work.
+    # Notable: return the 'seriesList' result from each node.fetch into result_queue
+    # instead of directly from the method. Queue.Queue() is threadsafe.
+    remote_fetches = []
+    result_queue = Queue.Queue()
+    for node in remote_nodes:
+      fetch_thread = threading.Thread(target=node.fetch,
+                                      args=(startTime, endTime, now, result_queue))
+      fetch_thread.start()
+
+      remote_fetches.append(fetch_thread)
+
+    # Once the remote_fetches have started, wait for them all to finish. Assuming an
+    # upper bound of REMOTE_STORE_FETCH_TIMEOUT per thread, this should take about that
+    # amount of time (6s by default) at the longest. If every thread blocks permanently,
+    # then this could take a horrible REMOTE_STORE_FETCH_TIMEOUT * num(remote_fetches),
+    # but then that would imply that remote_storage's HTTPConnectionWithTimeout class isn't
+    # working correctly :-)
+    for fetch_thread in remote_fetches:
+      try:
+        fetch_thread.join(settings.REMOTE_STORE_FETCH_TIMEOUT)
+      except:
+        log.exception("Failed to join remote_fetch thread within %ss" % (settings.REMOTE_STORE_FETCH_TIMEOUT))
+
+    # Used as a cache to avoid recounting series None values below.
+    series_best_nones = {}
+
+    # Once we've waited for the threads to return, process the results. We could theoretically
+    # start processing results right away, but that's a relatively minor optimization compared
+    # to not waiting for remote hosts sequentially.
+    while not result_queue.empty():
+      try:
+        results = result_queue.get(False)
+      except:
+        log.exception("result_queue not empty, but unable to retrieve results")
+
+      for series in results:
+        ts = TimeSeries(series['name'], series['start'], series['end'], series['step'], series['values'])
+        ts.pathExpression = pathExpr # hack as above
+
+        series_handled = False
+        for known in seriesList:
+          if series['name'] == known.name:
+            # This counts the Nones in each series, and is unfortunately O(n) for each
+            # series, which may be worth further optimization. The value of doing this
+            # at all is to avoid the "flipping" effect of loading a graph multiple times
+            # and having inconsistent data returned if one of the backing stores has
+            # inconsistent data. This is imperfect as a validity test, but in practice
+            # nicely keeps us using the "most complete" dataset available. Think of it
+            # as a very weak CRDT resolver.
+            candidate_nones = len([val for val in series['values'] if val is None])
+
+            # To avoid repeatedly recounting the 'Nones' in series we've already seen,
+            # cache the best known count so far in a dict.
+            if known.name in series_best_nones:
+              known_nones = series_best_nones[known.name]
+            else:
+              known_nones = len([val for val in known if val is None])
+              series_best_nones[known.name] = known_nones
+
+            series_handled = True
+            if candidate_nones >= known_nones:
+              # If we already have this series in the seriesList, and the
+              # candidate is 'worse' than what we already have, we don't need
+              # to compare anything else. Save ourselves some work here.
+              break
+            else:
+              # We've found a series better than what we've already seen. Update
+              # the count cache and replace the given series in the array.
+              series_best_nones[known.name] = candidate_nones
+              seriesList[seriesList.index(known)] = ts
+
+        # If we looked at this series above, and it matched a 'known'
+        # series already, then it's already in the series list (or ignored).
+        # If not, append it here.
+        if not series_handled:
+          seriesList.append(ts)
+
+  # Stabilize the order of the results by ordering the resulting series by name.
+  # This returns the result ordering to the behavior observed pre PR#1010.
+  return sorted(seriesList, key=lambda series: series.name)
 
 
 def mergeResults(dbResults, cacheResults):

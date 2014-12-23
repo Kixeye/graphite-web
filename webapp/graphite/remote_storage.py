@@ -105,11 +105,12 @@ class RemoteNode:
     self.__isLeaf = isLeaf
 
 
-  def fetch(self, startTime, endTime, now=None):
+  def fetch(self, startTime, endTime, now=None, result_queue=None):
     if not self.__isLeaf:
       return []
 
     query_params = [
+      ('local', '1'),
       ('target', self.metric_path),
       ('format', 'pickle'),
       ('from', str( int(startTime) )),
@@ -128,14 +129,10 @@ class RemoteNode:
 
     seriesList = unpickle.loads(rawData)
 
-    if seriesList == []:
-      return None
-
-    assert len(seriesList) == 1, "Invalid result: seriesList=%s" % str(seriesList)
-    series = seriesList[0]
-
-    timeInfo = (series['start'], series['end'], series['step'])
-    return (timeInfo, series['values'])
+    if result_queue:
+      result_queue.put(seriesList)
+    else:
+      return seriesList
 
   def isLeaf(self):
     return self.__isLeaf
