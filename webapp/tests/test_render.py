@@ -28,9 +28,15 @@ class RenderTest(TestCase):
 
         response = self.client.get(url, {'target': 'test', 'format': 'json'})
         self.assertEqual(json.loads(response.content), [])
+        self.assertTrue(response.has_header('Expires'))
+        self.assertTrue(response.has_header('Last-Modified'))
+        self.assertTrue(response.has_header('Cache-Control'))
 
         response = self.client.get(url, {'target': 'test'})
         self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertTrue(response.has_header('Expires'))
+        self.assertTrue(response.has_header('Last-Modified'))
+        self.assertTrue(response.has_header('Cache-Control'))
 
         self.addCleanup(self.wipe_whisper)
         whisper.create(self.db, [(1, 60)])
@@ -119,3 +125,29 @@ class RenderTest(TestCase):
         # Sanity check against non-stacked mode - should be identical
         graph = LineGraph(data=[ts], areaMode='none', width=75)
         self.assertEqual(graph.yTop, 25)
+
+    def test_correct_timezone(self):
+        url = reverse('graphite.render.views.renderView')
+        response = self.client.get(url, {
+                 'target': 'constantLine(12)',
+                 'format': 'json',
+                 'from': '07:01_20140226',
+                 'until': '08:01_20140226',
+                 'tz': 'UTC',
+        })
+        data = json.loads(response.content)[0]['datapoints']
+        # all the from/until/tz combinations lead to the same window
+        expected = [[12, 1393398060], [12, 1393401660]]
+        self.assertEqual(data, expected)
+
+        response = self.client.get(url, {
+                 'target': 'constantLine(12)',
+                 'format': 'json',
+                 'from': '08:01_20140226',
+                 'until': '09:01_20140226',
+                 'tz': 'Europe/Berlin',
+        })
+        data = json.loads(response.content)[0]['datapoints']
+        # all the from/until/tz combinations lead to the same window
+        expected = [[12, 1393398060], [12, 1393401660]]
+        self.assertEqual(data, expected)

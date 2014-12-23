@@ -20,7 +20,7 @@ from graphite.logger import log
 from graphite.storage import STORE, LOCAL_STORE
 from graphite.remote_storage import RemoteNode
 from graphite.render.hashing import ConsistentHashRing
-from graphite.util import unpickle
+from graphite.util import unpickle, epoch
 
 try:
   import cPickle as pickle
@@ -255,9 +255,9 @@ def fetchData(requestContext, pathExpr):
   seriesList = []
   resultsList = []
   remoteNodes = {}
-  startTime = requestContext['startTime']
-  endTime = requestContext['endTime']
-  now = requestContext['now']
+  startTime = int(epoch(requestContext['startTime']))
+  endTime = int(epoch(requestContext['endTime']))
+  now = int(epoch(requestContext['now']))
 
   if requestContext['localOnly']:
     store = LOCAL_STORE
@@ -273,7 +273,7 @@ def fetchData(requestContext, pathExpr):
     log.metric_access(dbFile.metric_path)
 
     if dbFile.isLocal():
-      dbResults = dbFile.fetch(timestamp(startTime), timestamp(endTime), timestamp(now))
+      dbResults = dbFile.fetch(startTime, endTime, now)
       results = dbResults
 
       try:
@@ -296,7 +296,7 @@ def fetchData(requestContext, pathExpr):
         remoteNodes[dbFile.store] = RemoteNode(dbFile.store, [dbFile.metric_path], True)
 
   for remoteNode in remoteNodes:
-    results = remoteNodes[remoteNode].fetch(timestamp(startTime), timestamp(endTime), timestamp(now))
+    results = remoteNodes[remoteNode].fetch(startTime, endTime, now)
 
     if results:
       resultsList.extend(results)
@@ -333,7 +333,3 @@ def mergeResults(dbResults, cacheResults):
 
   return (timeInfo,values)
 
-
-def timestamp(datetime):
-  "Convert a datetime object into epoch time"
-  return time.mktime( datetime.timetuple() )

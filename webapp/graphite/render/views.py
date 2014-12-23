@@ -46,6 +46,7 @@ from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings
 from django.utils.timezone import get_current_timezone
+from django.utils.cache import add_never_cache_headers, patch_response_headers
 
 
 def renderView(request):
@@ -114,12 +115,12 @@ def renderView(request):
         log.rendering("Retrieval of %s took %.6f" % (target, time() - t))
         data.extend(seriesList)
 
-    if useCache:
-      cache.set(dataKey, data, cacheTimeout)
+      if useCache:
+        cache.add(dataKey, data, cacheTimeout)
 
     format = requestOptions.get('format')
     if format == 'csv':
-      response = HttpResponse(mimetype='text/csv')
+      response = HttpResponse(content_type='text/csv')
       writer = csv.writer(response, dialect='excel')
 
       for series in data:
@@ -163,16 +164,18 @@ def renderView(request):
       if 'jsonp' in requestOptions:
         response = HttpResponse(
           content="%s(%s)" % (requestOptions['jsonp'], json.dumps(series_data)),
-          mimetype='text/javascript')
+          content_type='text/javascript')
       else:
-        response = HttpResponse(content=json.dumps(series_data), mimetype='application/json')
+        response = HttpResponse(content=json.dumps(series_data), content_type='application/json')
 
-      response['Pragma'] = 'no-cache'
-      response['Cache-Control'] = 'no-cache'
+      if useCache:
+        patch_response_headers(response, cache_timeout=cacheTimeout)
+      else:
+        add_never_cache_headers(response)
       return response
 
     if format == 'raw':
-      response = HttpResponse(mimetype='text/plain')
+      response = HttpResponse(content_type='text/plain')
       for series in data:
         response.write( "%s,%d,%d,%d|" % (series.name, series.start, series.end, series.step) )
         response.write( ','.join(map(str,series)) )
@@ -185,7 +188,7 @@ def renderView(request):
       graphOptions['outputFormat'] = 'svg'
 
     if format == 'pickle':
-      response = HttpResponse(mimetype='application/pickle')
+      response = HttpResponse(content_type='application/pickle')
       seriesInfo = [series.getInfo() for series in data]
       pickle.dump(seriesInfo, response, protocol=-1)
 
@@ -204,12 +207,15 @@ def renderView(request):
   if useSVG and 'jsonp' in requestOptions:
     response = HttpResponse(
       content="%s(%s)" % (requestOptions['jsonp'], json.dumps(image)),
-      mimetype='text/javascript')
+      content_type='text/javascript')
   else:
     response = buildResponse(image, useSVG and 'image/svg+xml' or 'image/png')
 
   if useCache:
-    cache.set(requestKey, response, cacheTimeout)
+    cache.add(requestKey, response, cacheTimeout)
+    patch_response_headers(response, cache_timeout=cacheTimeout)
+  else:
+    add_never_cache_headers(response)
 
   log.rendering('Total rendering time %.6f seconds' % (time() - start))
   return response
@@ -361,7 +367,7 @@ def delegateRendering(graphType, graphOptions):
 def renderLocalView(request):
   try:
     start = time()
-    reqParams = StringIO(request.raw_post_data)
+    reqParams = StringIO(request.body)
     graphType = reqParams.readline().strip()
     optionsPickle = reqParams.read()
     reqParams.close()
@@ -369,7 +375,9 @@ def renderLocalView(request):
     options = unpickle.loads(optionsPickle)
     image = doImageRender(graphClass, options)
     log.rendering("Delegated rendering request took %.6f seconds" % (time() -  start))
-    return buildResponse(image)
+    response = buildResponse(image)
+    add_never_cache_headers(response)
+    return response
   except:
     log.exception("Exception in graphite.render.views.rawrender")
     return HttpResponseServerError()
@@ -422,11 +430,8 @@ def doImageRender(graphClass, graphOptions):
   return imageData
 
 
-def buildResponse(imageData, mimetype="image/png"):
-  response = HttpResponse(imageData, mimetype=mimetype)
-  response['Cache-Control'] = 'no-cache'
-  response['Pragma'] = 'no-cache'
-  return response
+def buildResponse(imageData, content_type="image/png"):
+  return HttpResponse(imageData, content_type=content_type)
 
 
 def errorPage(message):
