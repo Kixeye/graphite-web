@@ -21,7 +21,7 @@ import random
 import time
 
 from graphite.logger import log
-from graphite.render.attime import parseTimeOffset
+from graphite.render.attime import parseTimeOffset, parseATTime
 
 from graphite.events import models
 
@@ -118,6 +118,10 @@ def safeAbs(value):
   if value is None: return None
   return abs(value)
 
+def safeIsNotEmpty(values):
+    safeValues = [v for v in values if v is not None]
+    return len(safeValues) > 0
+
 # Greatest common divisor
 def gcd(a, b):
   if b == 0:
@@ -145,10 +149,7 @@ def normalize(seriesLists):
   raise NormalizeEmptyResultError()
 
 class NormalizeEmptyResultError(Exception):
-  """
-  Error thrown by the function 'normalize'
-  when it has an empty result
-  """
+  # throw error for normalize() when empty
   pass
 
 
@@ -292,15 +293,24 @@ def multiplySeriesWithWildcards(requestContext, seriesList, *position): #XXX
 
 def diffSeries(requestContext, *seriesLists):
   """
-  Can take two or more metrics, or a single metric and a constant.
-  Subtracts parameters 2 through n from parameter 1.
+  Subtracts series 2 through n from series 1.
 
   Example:
 
   .. code-block:: none
 
     &target=diffSeries(service.connections.total,service.connections.failed)
-    &target=diffSeries(service.connections.total,5)
+
+  To diff a series and a constant, one should use offset instead of (or in
+  addition to) diffSeries
+
+  Example:
+
+  .. code-block:: none
+
+    &target=offset(service.connections.total,-5)
+
+    &target=offset(diffSeries(service.connections.total,service.connections.failed),-4)
 
   """
   (seriesList,start,end,step) = normalize(seriesLists)
@@ -2400,7 +2410,10 @@ def timeStack(requestContext, seriesList, timeShiftUnit, timeShiftStart, timeShi
   if timeShiftUnit[0].isdigit():
     timeShiftUnit = '-' + timeShiftUnit
   delta = parseTimeOffset(timeShiftUnit)
-  series = seriesList[0] # if len(seriesList) > 1, they will all have the same pathExpression, which is all we care about.
+
+  # if len(seriesList) > 1, they will all have the same pathExpression, which is all we care about.
+  series = seriesList[0]
+
   results = []
   timeShiftStartint = int(timeShiftStart)
   timeShiftEndint = int(timeShiftEnd)
@@ -2455,7 +2468,8 @@ def timeShift(requestContext, seriesList, timeShift, resetEnd=True):
   myContext['endTime'] = requestContext['endTime'] + delta
   results = []
   if len(seriesList) > 0:
-    series = seriesList[0] # if len(seriesList) > 1, they will all have the same pathExpression, which is all we care about.
+    # if len(seriesList) > 1, they will all have the same pathExpression, which is all we care about.
+    series = seriesList[0]
 
     for shiftedSeries in evaluateTarget(myContext, series.pathExpression):
       shiftedSeries.name = 'timeShift(%s, %s)' % (shiftedSeries.name, timeShift)
@@ -2467,6 +2481,44 @@ def timeShift(requestContext, seriesList, timeShift, resetEnd=True):
       results.append(shiftedSeries)
 
   return results
+
+
+def timeSlice(requestContext, seriesList, startSliceAt, endSliceAt="now"):
+  """
+  Takes one metric or a wildcard metric, followed by a quoted string with the
+  time to start the line and another quoted string with the time to end the line.
+  The start and end times are inclusive. See ``from / until`` in the render\_api_
+  for examples of time formats.
+
+  Useful for filtering out a part of a series of data from a wider range of
+  data.
+
+  Example:
+
+  .. code-block:: none
+
+    &target=timeSlice(network.core.port1,"00:00 20140101","11:59 20140630")
+    &target=timeSlice(network.core.port1,"12:00 20140630","now")
+
+  """
+
+  results = []
+  start = time.mktime(parseATTime(startSliceAt).timetuple())
+  end = time.mktime(parseATTime(endSliceAt).timetuple())
+
+  for slicedSeries in seriesList:
+    slicedSeries.name = 'timeSlice(%s, %s, %s)' % (slicedSeries.name, int(start), int(end))
+
+    curr = time.mktime(requestContext["startTime"].timetuple())
+    for i, v in enumerate(slicedSeries):
+      if v is None or curr < start or curr > end:
+        slicedSeries[i] = None
+      curr += slicedSeries.step
+
+    results.append(slicedSeries)
+
+  return results
+
 
 def constantLine(requestContext, value):
   """
@@ -3132,6 +3184,22 @@ def sinFunction(requestContext, name, amplitude=1, step=60):
             int(epoch(requestContext["endTime"])),
             step, values)]
 
+def removeEmptySeries(requestContext, seriesList):
+    """
+    Takes one metric or a wildcard seriesList.
+    Out of all metrics passed, draws only the metrics with not empty data
+
+    Example:
+
+    .. code-block:: none
+
+      &target=removeEmptySeries(server*.instance*.threads.busy)
+
+    Draws only live servers with not empty data.
+
+    """
+    return [ series for series in seriesList if safeIsNotEmpty(series) ]
+
 def randomWalkFunction(requestContext, name, step=60):
   """
   Short Alias: randomWalk()
@@ -3260,6 +3328,7 @@ SeriesFunctions = {
   'invert' : invert,
   'timeStack': timeStack,
   'timeShift': timeShift,
+  'timeSlice': timeSlice,
   'summarize' : summarize,
   'smartSummarize' : smartSummarize,
   'hitcount'  : hitcount,
@@ -3304,6 +3373,7 @@ SeriesFunctions = {
   'useSeriesAbove': useSeriesAbove,
   'exclude' : exclude,
   'grep' : grep,
+  'removeEmptySeries' : removeEmptySeries,
 
   # Data Filter functions
   'removeAbovePercentile' : removeAbovePercentile,
